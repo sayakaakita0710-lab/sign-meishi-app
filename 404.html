@@ -18,13 +18,18 @@
     :root{ --bg:#0e1113; --panel:#171b1e; --ink:#eceef0; --sub:#98a1ab; --line:#2a3034; --accent:#eceef0; }
   }
   *{box-sizing:border-box}
-  html,body{margin:0;padding:0}
+  html,body{
+    margin:0;padding:0;
+    width:100%;max-width:100%;
+    overflow-x:hidden;          /* 横に少しでもはみ出しても画面が左右に振れないようにする */
+    overscroll-behavior-x:none; /* 横方向の引っぱりを起こさない */
+  }
   body{
     background:var(--bg); color:var(--ink);
     font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP","Yu Gothic",sans-serif;
     font-size:15px; line-height:1.6; -webkit-text-size-adjust:100%;
   }
-  .wrap{max-width:720px;margin:0 auto;padding:0 14px 120px}
+  .wrap{max-width:720px;width:100%;margin:0 auto;padding:0 14px 120px}
   header.app{
     position:sticky;top:0;z-index:40;background:var(--bg);
     padding:calc(env(safe-area-inset-top) + 10px) 14px 8px;
@@ -74,7 +79,12 @@
     border:1px solid var(--line);color:var(--sub);white-space:nowrap;
   }
   .pill.done{border-color:var(--ok);color:var(--ok)}
-  .chips{display:flex;gap:6px;overflow-x:auto;padding:6px 0;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .chips{
+    display:flex;gap:6px;overflow-x:auto;padding:6px 0;
+    -webkit-overflow-scrolling:touch;scrollbar-width:none;
+    overscroll-behavior-x:contain;  /* 行の端まで来てもページ本体に横スクロールを渡さない */
+    touch-action:pan-x;
+  }
   .chips::-webkit-scrollbar{display:none}
   .chip{
     flex:0 0 auto;border:1px solid var(--line);background:var(--panel);border-radius:999px;
@@ -92,7 +102,11 @@
   .center{text-align:center}
   h2{font-size:17px;margin:18px 0 6px;letter-spacing:.02em}
   h3{font-size:14px;margin:16px 0 4px;color:var(--sub);letter-spacing:.06em;font-weight:700}
-  .sheet{position:fixed;inset:0;z-index:60;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .sheet{
+    position:fixed;inset:0;z-index:60;background:var(--bg);
+    overflow-y:auto;overflow-x:hidden;
+    -webkit-overflow-scrolling:touch;overscroll-behavior:contain;
+  }
   .sheet header{
     position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);z-index:2;
     padding:calc(env(safe-area-inset-top) + 10px) 14px 10px;
@@ -185,7 +199,6 @@
     <div class="inner">
       <button class="btn sm ghost" id="ed-cancel">閉じる</button>
       <div class="ttl" id="ed-title">名刺を追加</div>
-      <button class="btn sm primary" id="ed-save">保存</button>
     </div>
   </header>
   <div class="wrap" style="padding-top:12px">
@@ -231,6 +244,9 @@
     </div>
     <label class="f"><span>イベント・きっかけ</span><input id="f-event_name" list="events" placeholder="例）◯◯カンファレンス2026"><datalist id="events"></datalist></label>
     <label class="f"><span>タグ（カンマ区切り・任意）</span><input id="f-tags" type="text" placeholder="要フォロー, 決裁者, 紹介あり"></label>
+
+    <div style="height:22px"></div>
+    <button class="btn primary" id="ed-save" style="width:100%;padding:15px;font-size:16px">保存する</button>
 
     <div id="ed-del-box" class="hide" style="margin-top:24px">
       <button class="btn danger" style="width:100%" id="ed-delete">この名刺を削除する</button>
