@@ -226,7 +226,7 @@
     <label class="f"><span>次アクション</span><input id="f-next_action" type="text" placeholder="例）月内に事例3本つけてお礼メール"></label>
 
     <div class="grid2">
-      <label class="f"><span>交換した人</span><select id="f-owner_email"></select></label>
+      <label class="f"><span>交換した人</span><select id="f-owner_name"></select></label>
       <label class="f"><span>交換日</span><input id="f-met_on" type="date"></label>
     </div>
     <label class="f"><span>イベント・きっかけ</span><input id="f-event_name" list="events" placeholder="例）◯◯カンファレンス2026"><datalist id="events"></datalist></label>
@@ -295,6 +295,16 @@
       <button class="btn" id="st-add">追加</button>
     </div>
 
+    <h3>交換した人の選択肢</h3>
+    <div class="muted" style="margin-bottom:6px">
+      名刺を登録するときに選ぶ名前。ログイン権限とは別なので、アカウントがない人も入れられます。
+    </div>
+    <div id="st-owners"></div>
+    <div class="row" style="margin-top:8px">
+      <input id="st-new-owner" class="grow" type="text" placeholder="なまえ" style="width:auto">
+      <button class="btn" id="st-add-owner">追加</button>
+    </div>
+
     <h3>OCRの状態</h3>
     <div class="card muted" id="st-ocr">確認中…</div>
 
@@ -347,7 +357,9 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&l
 
 const state = {
   me: null,          // ログイン中のメールアドレス
+  myName: '',        // 「交換した人」の初期値に使う表示名
   members: [],
+  owners: [],        // 「交換した人」の選択肢
   cards: [],
   filter: { q: '', cat: '', status: '' },
   editing: null,     // 編集中カード（新規は null）
@@ -443,13 +455,22 @@ $('st-logout').onclick = async () => { await sb.auth.signOut(); location.reload(
 
 /* ------------------------------------------------------------------- data */
 async function loadAll() {
-  const [c, m] = await Promise.all([
+  const [c, m, o] = await Promise.all([
     sb.from('cards').select('*').order('created_at', { ascending: false }),
     sb.from('members').select('*').order('created_at'),
+    sb.from('owners').select('*').order('sort').order('name'),
   ]);
   if (c.error) throw c.error;
   state.cards = c.data || [];
   state.members = m.data || [];
+  state.owners = o.data || [];
+
+  // 自分の名前は、メンバー表の表示名が選択肢にあればそれを、なければ先頭を初期値にする
+  const mine = state.members.find(x => x.email === state.me);
+  const label = mine?.display_name || '';
+  state.myName = state.owners.some(x => x.name === label)
+    ? label
+    : (state.owners[0]?.name || label);
 }
 
 let channel = null;
@@ -500,7 +521,7 @@ function matches(c) {
   if (f.status && c.status !== f.status) return false;
   if (f.q) {
     const hay = [c.company, c.name, c.name_kana, c.department, c.title, c.email,
-                 c.talked, c.next_action, c.event_name, (c.tags || []).join(' '), c.owner_email]
+                 c.talked, c.next_action, c.event_name, (c.tags || []).join(' '), c.owner_name]
       .join(' ').toLowerCase();
     if (!f.q.toLowerCase().split(/\s+/).every(w => hay.includes(w))) return false;
   }
@@ -529,7 +550,7 @@ function renderList() {
         <span class="tag ${c.category}">${catLabel(c.category)}</span>
         <span class="pill ${c.status === 'new' ? '' : 'done'}">${stLabel(c.status)}</span>
         <span class="grow"></span>
-        <span class="muted">${esc((c.owner_email || '').split('@')[0])}</span>
+        <span class="muted">${esc(c.owner_name || '')}</span>
       </div>
       <div style="font-weight:700">${esc(c.company || '（社名なし）')}</div>
       <div>${esc(c.name || '（氏名なし）')}<span class="muted"> ${esc([c.department, c.title].filter(Boolean).join(' / '))}</span></div>
@@ -563,7 +584,7 @@ async function renderDetail(c) {
     ['携帯', c.mobile ? `<a href="tel:${esc(c.mobile)}">${esc(c.mobile)}</a>` : ''],
     ['WEB', c.website ? `<a href="${esc(c.website.startsWith('http') ? c.website : 'https://' + c.website)}" target="_blank" rel="noopener">${esc(c.website)}</a>` : ''],
     ['住所', esc(c.address)],
-    ['交換', `${esc(c.met_on || '')}${c.event_name ? ' ・ ' + esc(c.event_name) : ''}<br><span class="muted">担当: ${esc(c.owner_email || '')}</span>`],
+    ['交換', `${esc(c.met_on || '')}${c.event_name ? ' ・ ' + esc(c.event_name) : ''}<br><span class="muted">担当: ${esc(c.owner_name || '')}</span>`],
   ].filter(r => r[1]);
 
   $('dt-body').innerHTML = `
@@ -590,11 +611,25 @@ async function renderDetail(c) {
       <div class="chips" id="dt-status">
         ${STATUSES.map(([v, l]) => `<button class="chip" data-v="${v}" aria-pressed="${v === c.status}">${l}</button>`).join('')}
       </div>
-      <div class="row" style="margin-top:8px">
-        <button class="btn sm primary" data-draft="thanks">お礼メール文案</button>
-        <button class="btn sm" data-draft="proposal">提案の切り口</button>
+    </div>
+
+    <h3>お礼メール下書き</h3>
+    <div class="card">
+      <div class="muted" style="font-size:12.5px">
+        ここに入れた文面が、スプレッドシートの「メール下書き」列（T列）に出ます。
       </div>
-      <div id="dt-draft" style="margin-top:8px"></div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn sm primary" data-draft="thanks">文案をつくる</button>
+        <button class="btn sm" data-draft="proposal">提案の切り口を見る</button>
+      </div>
+      <div id="dt-draft-msg" class="muted" style="margin-top:6px"></div>
+      <textarea id="dt-draft-out" style="min-height:200px;margin-top:6px"
+        placeholder="1行目を「件名: 〜」にしておくと、スプレッドシート側でGmailの件名として使われます。">${esc(c.draft_email || '')}</textarea>
+      <div class="row" style="margin-top:6px">
+        <button class="btn sm primary" id="dt-draft-save">下書きを保存</button>
+        <button class="btn sm" id="dt-draft-copy">コピー</button>
+      </div>
+      <div id="dt-proposal" style="margin-top:10px"></div>
     </div>
 
     <h3>追記メモ（${(notes.data || []).length}）</h3>
@@ -637,20 +672,44 @@ async function renderDetail(c) {
     $('dt-note-in').value = '';
     renderDetail(c);
   };
+  const saveDraft = async (text) => {
+    const { error } = await sb.from('cards').update({ draft_email: text }).eq('id', c.id);
+    if (error) { toast('保存できません: ' + error.message); return false; }
+    c.draft_email = text;
+    const i = state.cards.findIndex(x => x.id === c.id);
+    if (i >= 0) state.cards[i] = { ...state.cards[i], draft_email: text };
+    return true;
+  };
+  $('dt-draft-save').onclick = async () => {
+    if (await saveDraft($('dt-draft-out').value)) toast('下書きを保存しました');
+  };
+  $('dt-draft-copy').onclick = () =>
+    navigator.clipboard.writeText($('dt-draft-out').value).then(() => toast('コピーしました'));
+
   $('dt-body').querySelectorAll('[data-draft]').forEach(btn => {
     btn.onclick = async () => {
       const kind = btn.dataset.draft;
-      const box = $('dt-draft');
-      box.innerHTML = '<span class="muted"><span class="spin"></span> 生成中…</span>';
+      const msg = $('dt-draft-msg');
+      const prop = $('dt-proposal');
+      const target = kind === 'thanks' ? msg : prop;
+      target.innerHTML = '<span class="muted"><span class="spin"></span> 生成中…</span>';
       try {
         const notesTxt = (notes.data || []).map(n => n.body).join('\n');
         const r = await callFn('ocr', { mode: 'draft', kind, card: c, notes: notesTxt });
-        box.innerHTML = `<textarea id="dt-draft-out" style="min-height:220px">${esc(r.text)}</textarea>
-          <button class="btn sm" style="margin-top:6px" id="dt-draft-copy">コピー</button>`;
-        $('dt-draft-copy').onclick = () =>
-          navigator.clipboard.writeText($('dt-draft-out').value).then(() => toast('コピーしました'));
+        if (kind === 'thanks') {
+          // お礼メールは下書き欄そのもの。作った時点で保存まで済ませる。
+          $('dt-draft-out').value = r.text;
+          prop.innerHTML = '';
+          msg.textContent = (await saveDraft(r.text))
+            ? '文案をつくって保存しました。手直ししたら「下書きを保存」を押してください。'
+            : '文案はできましたが保存できませんでした。';
+        } else {
+          // 提案の切り口は下書きとは別物なので、上書きせず下に出すだけ
+          msg.textContent = '';
+          prop.innerHTML = `<div class="note" style="white-space:pre-wrap">${esc(r.text)}</div>`;
+        }
       } catch (err) {
-        box.innerHTML = `<span class="muted">${esc(err.message)}</span>`;
+        target.innerHTML = `<span class="muted">${esc(err.message)}</span>`;
       }
     };
   });
@@ -663,7 +722,7 @@ $('dt-edit').onclick = () => {
 
 /* ------------------------------------------------------------------- edit */
 const FIELDS = ['company','name','department','title','name_kana','email','phone','mobile',
-                'address','website','talked','next_action','event_name','met_on','owner_email'];
+                'address','website','talked','next_action','event_name','met_on','owner_name'];
 
 function openEdit(card) {
   state.editing = card || null;
@@ -675,12 +734,12 @@ function openEdit(card) {
   $('ed-shoot').classList.toggle('hide', !!card);
   $('ed-file').value = '';
 
-  $('f-owner_email').innerHTML = state.members
-    .map(m => `<option value="${esc(m.email)}">${esc(m.display_name || m.email)}</option>`).join('');
+  $('f-owner_name').innerHTML = state.owners
+    .map(o => `<option value="${esc(o.name)}">${esc(o.name)}</option>`).join('');
   const evs = [...new Set(state.cards.map(c => c.event_name).filter(Boolean))];
   $('events').innerHTML = evs.map(v => `<option value="${esc(v)}">`).join('');
 
-  const src = card || { owner_email: state.me, met_on: todayJST(), category: 'other' };
+  const src = card || { owner_name: state.myName, met_on: todayJST(), category: 'other' };
   FIELDS.forEach(f => { const el = $('f-' + f); if (el) el.value = src[f] ?? ''; });
   $('f-tags').value = (src.tags || []).join(', ');
   state.cat = src.category || 'other';
@@ -749,7 +808,7 @@ $('ed-save').onclick = async () => {
   payload.tags = $('f-tags').value.split(',').map(s => s.trim()).filter(Boolean);
   if (!payload.company && !payload.name) return toast('会社名か氏名のどちらかは入れてください');
   if (!payload.met_on) payload.met_on = todayJST();
-  if (!payload.owner_email) payload.owner_email = state.me;
+  if (!payload.owner_name) payload.owner_name = state.myName;
 
   $('ed-save').disabled = true;
   const t = toast('<span class="spin"></span> 保存中…', 0);
@@ -801,12 +860,12 @@ $('ed-delete').onclick = async () => {
 
 /* ----------------------------------------------------------------- export */
 const EX_COLS = [
-  ['met_on','交換日'], ['event_name','イベント'], ['owner_email','交換した人'],
+  ['met_on','交換日'], ['event_name','イベント'], ['owner_name','交換した人'],
   ['category','区分'], ['company','会社名'], ['department','部署'], ['title','役職'],
   ['name','氏名'], ['name_kana','ふりがな'], ['email','メール'], ['phone','電話'],
   ['mobile','携帯'], ['address','住所'], ['website','WEB'],
   ['talked','話した内容'], ['next_action','次アクション'], ['status','フォロー状況'],
-  ['tags','タグ'], ['created_at','登録日時'],
+  ['tags','タグ'], ['created_at','登録日時'], ['draft_email','メール下書き'],
 ];
 function exportRows() {
   return state.cards.map(c => EX_COLS.map(([k]) => {
@@ -852,6 +911,32 @@ function renderMembers() {
     renderMembers(); toast('外しました');
   };
 }
+function renderOwners() {
+  $('st-owners').innerHTML = state.owners.map(o => `
+    <div class="card row" style="margin:6px 0">
+      <span class="grow">${esc(o.name)}</span>
+      <button class="btn sm danger" data-rmo="${esc(o.name)}">削除</button>
+    </div>`).join('') || '<div class="muted">まだありません</div>';
+  $('st-owners').onclick = async e => {
+    const b = e.target.closest('[data-rmo]'); if (!b) return;
+    if (!confirm(`「${b.dataset.rmo}」を選択肢から外します。登録済みの名刺の記録はそのまま残ります。`)) return;
+    const { error } = await sb.from('owners').delete().eq('name', b.dataset.rmo);
+    if (error) return toast('削除できません: ' + error.message);
+    state.owners = state.owners.filter(o => o.name !== b.dataset.rmo);
+    renderOwners(); toast('外しました');
+  };
+}
+$('st-add-owner').onclick = async () => {
+  const name = $('st-new-owner').value.trim();
+  if (!name) return;
+  const { data, error } = await sb.from('owners').insert({ name }).select().single();
+  if (error) return toast('追加できません: ' + error.message);
+  state.owners.push(data);
+  $('st-new-owner').value = '';
+  renderOwners();
+  toast('追加しました');
+};
+
 $('st-add').onclick = async () => {
   const email = $('st-new-email').value.trim().toLowerCase();
   if (!email.includes('@')) return toast('メールアドレスを入れてください');
@@ -870,6 +955,7 @@ $('ex-back').onclick = () => closeSheet('v-export');
 $('go-settings').onclick = async () => {
   $('st-me').textContent = state.me;
   renderMembers();
+  renderOwners();
   openSheet('v-settings');
   try {
     const r = await callFn('ocr', { mode: 'health' });
