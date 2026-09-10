@@ -908,11 +908,18 @@ async function boot() {
   try {
     await loadAll();
   } catch (err) {
-    show('v-login');
-    $('li-msg').innerHTML = `<b>${esc(state.me)}</b> はメンバー登録されていません。<br>既存メンバーに追加してもらってください。`;
-    $('login-step2').classList.add('hide');
-    $('login-step1').classList.remove('hide');
-    await sb.auth.signOut();
+    // 通信エラーでログアウトさせない。会場の電波が不安定でも、
+    // 電波が戻れば再読み込みだけで作業を続けられるようにする。
+    buildChips();
+    show('v-list');
+    $('hd-count').textContent = '接続できません';
+    $('list').innerHTML = `<div class="card center" style="padding:28px 14px">
+      <div class="muted">データを読み込めませんでした。<br>電波の良いところで再試行してください。</div>
+      <div style="height:12px"></div>
+      <button class="btn" id="retry">再読み込み</button>
+      <div class="muted" style="margin-top:10px;font-size:11.5px">${esc(err.message || '')}</div>
+    </div>`;
+    $('retry').onclick = () => boot();
     return;
   }
   if (!state.members.some(m => m.email === state.me)) {
