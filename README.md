@@ -23,4 +23,9 @@ SUPABASE_URL=... SUPABASE_ANON_KEY=... node scripts/build.mjs
 # 出来た dist/index.html と dist/404.html をこのリポジトリにコピーして push
 ```
 
-push すると GitHub Actions が Pages へ自動デプロイする（1〜2分）。
+push すると GitHub Pages に自動反映される（1〜2分）。
+
+## Pages の設定
+
+Settings → Pages → Source を **Deploy from a branch** にし、Branch を `main` / `/ (root)` にしてある。
+ワークフローは使っていない（このリポジトリのファイルがそのまま配信される）。
