@@ -112,6 +112,10 @@
   .kv dt{color:var(--sub);font-size:12.5px;padding-top:2px}
   .kv dd{margin:0;word-break:break-word}
   a{color:inherit}
+  .mailbox{
+    border:1px dashed var(--line);border-radius:10px;padding:12px 14px;margin:12px 0;
+    font-size:13.5px;line-height:1.7;
+  }
   .banner{background:#fff6d6;color:#5b4600;border:1px solid #f0dd9a;border-radius:10px;padding:10px 12px;font-size:13px;margin:10px 0}
   @media (prefers-color-scheme: dark){.banner{background:#3a3218;color:#f2e2ac;border-color:#5a4d22}}
 </style>
@@ -136,18 +140,19 @@
       </div>
       <div id="login-step2" class="hide">
         <div class="muted" id="li-sent-to"></div>
-        <label class="f"><span>メールに届いた6桁のコード</span>
-          <input id="li-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456">
-        </label>
-        <div style="height:10px"></div>
-        <button class="btn primary" style="width:100%" id="li-verify">ログイン</button>
-        <div style="height:8px"></div>
+        <div class="mailbox">
+          <b>メール内の「Sign in」を押してください。</b>
+          <div class="muted" style="margin-top:4px">
+            押すとこの台帳が開き、そのままログインした状態になります。<br>
+            使いたい端末で開いてください（スマホで開けばスマホがログイン状態になります）。
+          </div>
+        </div>
         <button class="btn ghost sm" style="width:100%" id="li-back">メールアドレスを入れ直す</button>
       </div>
       <div id="li-msg" class="muted" style="margin-top:10px"></div>
     </div>
     <div class="muted center" style="margin-top:14px;font-size:11.5px">
-      パスワードは使いません。ログインのたびにメールへ届くコードで認証します。
+      パスワードは使いません。ログインのたびにメールへ届くリンクで認証します。
     </div>
   </div>
 </section>
@@ -304,9 +309,20 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 
 const SUPABASE_URL = 'https://ccronnibjqsthvysghuf.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNjcm9ubmlianFzdGh2eXNnaHVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkwMjEwODQsImV4cCI6MjEwNDU5NzA4NH0.SYVZV-YSTciSQHKHJZvQ_coKujg7k9ZX13m6UBPMqms';
+// メールのリンクを踏むとこのページに戻ってきて、URL の断片からセッションを拾う。
+// implicit フローにしているのは、メールを別端末で開いても成立させるため
+// （PKCE だとリンクを要求したブラウザでしか開けない）。
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    flowType: 'implicit',
+  },
 });
+
+/** メールのリンクから戻る先。クエリやハッシュを落とした素のURL */
+const APP_URL = location.origin + location.pathname;
 
 const CATS = [
   ['partner',    'パートナー'],
@@ -397,36 +413,31 @@ async function callFn(name, payload) {
 /* ------------------------------------------------------------------- auth */
 $('li-send').onclick = async () => {
   const email = $('li-email').value.trim().toLowerCase();
-  if (!email) return;
+  if (!email.includes('@')) { $('li-msg').textContent = 'メールアドレスを入れてください。'; return; }
   $('li-send').disabled = true;
   $('li-msg').textContent = '送信中…';
-  const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+  const { error } = await sb.auth.signInWithOtp({
+    email,
+    options: { shouldCreateUser: true, emailRedirectTo: APP_URL },
+  });
   $('li-send').disabled = false;
-  if (error) { $('li-msg').textContent = 'エラー: ' + error.message; return; }
+  if (error) {
+    // 標準のメール送信は時間あたりの通数制限がある。連打すると here に来る。
+    $('li-msg').textContent = /rate|limit|29/i.test(error.message)
+      ? '送信の上限に達しました。しばらく置いてからお試しください。'
+      : 'エラー: ' + error.message;
+    return;
+  }
   $('li-msg').textContent = '';
-  $('li-sent-to').textContent = email + ' に6桁のコードを送りました。';
+  $('li-sent-to').textContent = email + ' にログイン用のメールを送りました。';
   $('login-step1').classList.add('hide');
   $('login-step2').classList.remove('hide');
-  $('li-code').focus();
 };
 $('li-back').onclick = () => {
   $('login-step2').classList.add('hide');
   $('login-step1').classList.remove('hide');
   $('li-msg').textContent = '';
 };
-$('li-verify').onclick = async () => {
-  const email = $('li-email').value.trim().toLowerCase();
-  const token = $('li-code').value.trim();
-  if (token.length < 6) return;
-  $('li-verify').disabled = true;
-  $('li-msg').textContent = '確認中…';
-  const { error } = await sb.auth.verifyOtp({ email, token, type: 'email' });
-  $('li-verify').disabled = false;
-  if (error) { $('li-msg').textContent = 'コードが違うか期限切れです。'; return; }
-  $('li-msg').textContent = '';
-  await boot();
-};
-$('li-code').addEventListener('keydown', e => { if (e.key === 'Enter') $('li-verify').click(); });
 $('li-email').addEventListener('keydown', e => { if (e.key === 'Enter') $('li-send').click(); });
 $('st-logout').onclick = async () => { await sb.auth.signOut(); location.reload(); };
 
@@ -870,9 +881,29 @@ $('go-settings').onclick = async () => {
 $('st-back').onclick = () => closeSheet('v-settings');
 
 /* ------------------------------------------------------------------ boot */
+/** メールのリンクから戻ってきた直後の URL を掃除する（トークンを履歴に残さない） */
+function cleanUrl() {
+  if (location.hash.includes('access_token') || location.hash.includes('error') || location.search) {
+    history.replaceState(null, '', APP_URL);
+  }
+}
+
+/** リンクが期限切れなどで弾かれた場合、URL の断片にエラーが入って戻ってくる */
+function linkError() {
+  const h = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const e = h.get('error_description') || h.get('error');
+  return e ? decodeURIComponent(e.replace(/\+/g, ' ')) : null;
+}
+
 async function boot() {
+  const err = linkError();
   const { data: { session } } = await sb.auth.getSession();
-  if (!session) { show('v-login'); return; }
+  cleanUrl();
+  if (!session) {
+    show('v-login');
+    if (err) $('li-msg').textContent = 'ログインできませんでした（' + err + '）。もう一度お試しください。';
+    return;
+  }
   state.me = (session.user.email || '').toLowerCase();
   try {
     await loadAll();
@@ -895,6 +926,10 @@ async function boot() {
   subscribe();
   show('v-list');
 }
+// リンクを踏んで戻った直後は、URL の解析が終わってから SIGNED_IN が飛んでくる
+sb.auth.onAuthStateChange((event) => {
+  if (event === 'SIGNED_IN' && !state.me) boot();
+});
 boot();
 
 </script>
